@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/__pycache__/
+dist/
+.venv/
+venv/
+env/
+.env
+
+# PyInstaller
+*.spec.bak
+build/TextLens/
+build/Build/
+build/warn-TextLens.txt
+build/xref-TextLens.html
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Project artifacts
+*.log
+config.json
+history.json

@@ -1,0 +1,17 @@
+# TextLens desktop app — Python dependencies
+# Tested with Python 3.10 / 3.11 / 3.12 on Windows 10 & 11
+
+# GUI framework
+PySide6==6.7.3
+
+# HTTP client for AI API calls
+requests==2.32.3
+
+# Image processing
+Pillow==10.4.0
+
+# LaTeX -> MathML conversion (for Word paste format)
+latex2mathml==3.77.0
+
+# Screen capture (for the screenshot tool)
+mss==9.0.1
