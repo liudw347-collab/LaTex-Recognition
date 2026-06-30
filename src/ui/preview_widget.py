@@ -120,6 +120,9 @@ class LatexPreviewWidget(QTabWidget):
         return self.text_edit.toPlainText()
 
     def clear(self) -> None:
+        # Invalidate any in-flight preview worker so its result doesn't
+        # appear on the just-cleared label.
+        self._preview_generation += 1
         self.text_edit.blockSignals(True)
         self.text_edit.clear()
         self.text_edit.blockSignals(False)

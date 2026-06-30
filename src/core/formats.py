@@ -80,16 +80,26 @@ def to_word_html(raw: str) -> str:
     s = re.sub(r"^[-*] (.+)$", r"<UL_LI>\1</UL_LI>", s, flags=re.MULTILINE)
     s = re.sub(r"^\d+\. (.+)$", r"<OL_LI>\1</OL_LI>", s, flags=re.MULTILINE)
 
-    # Wrap consecutive ul items in <ul>
+    # Wrap consecutive ul items in <ul>. Replace ONLY the sentinel tags
+    # (not the bare string "UL_LI") so list item content containing the
+    # literal text "UL_LI" is not corrupted.
     s = re.sub(
         r"(<UL_LI>.*?</UL_LI>\n?)+",
-        lambda m: "<ul>" + m.group(0).replace("UL_LI", "li") + "</ul>",
+        lambda m: ("<ul>" +
+                   m.group(0)
+                   .replace("<UL_LI>", "<li>")
+                   .replace("</UL_LI>", "</li>") +
+                   "</ul>"),
         s,
     )
     # Wrap consecutive ol items in <ol>
     s = re.sub(
         r"(<OL_LI>.*?</OL_LI>\n?)+",
-        lambda m: "<ol>" + m.group(0).replace("OL_LI", "li") + "</ol>",
+        lambda m: ("<ol>" +
+                   m.group(0)
+                   .replace("<OL_LI>", "<li>")
+                   .replace("</OL_LI>", "</li>") +
+                   "</ol>"),
         s,
     )
 

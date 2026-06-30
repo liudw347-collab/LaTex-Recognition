@@ -41,7 +41,6 @@ from matplotlib.font_manager import FontProperties  # noqa: E402
 # Linux / Windows / macOS, and register the first one found with matplotlib.
 # This makes Chinese characters render correctly when mixed with LaTeX math.
 import os as _os
-import matplotlib.font_manager as fm
 
 _CJK_FONT_CANDIDATES = [
     # Linux

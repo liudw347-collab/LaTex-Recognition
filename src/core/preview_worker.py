@@ -34,5 +34,8 @@ class PreviewWorker(QRunnable):
                                  font_size=self.font_size)
             self.signals.finished.emit(png or b"")
         except Exception:
-            # Never crash the worker thread; just emit empty bytes
+            # Log the traceback to stderr so rendering bugs are diagnosable,
+            # then emit empty bytes so the UI shows "预览渲染失败".
+            import traceback
+            traceback.print_exc()
             self.signals.finished.emit(b"")

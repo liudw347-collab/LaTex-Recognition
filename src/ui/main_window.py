@@ -13,10 +13,11 @@ import time
 from pathlib import Path
 
 from PIL import Image
-from PySide6.QtCore import Qt, QThreadPool, QTimer
+from PySide6.QtCore import Qt, QSize, QMimeData, QThreadPool, QTimer
 from PySide6.QtGui import (
     QAction,
     QGuiApplication,
+    QImage,
     QKeySequence,
     QPixmap,
     QShortcut,
@@ -402,9 +403,9 @@ class MainWindow(QMainWindow):
             return
         qimg = clipboard.image()
         if qimg.isNull():
+            self.status_progress.setText("剪贴板图片无效")
             return
         # Convert QImage → PIL Image
-        from PySide6.QtGui import QImage
         # Get raw bytes in RGBA8888 format
         rgba = qimg.convertToFormat(QImage.Format.Format_RGBA8888)
         ptr = rgba.constBits()
@@ -440,15 +441,12 @@ class MainWindow(QMainWindow):
             overlay.exec()
             rect = overlay.selected_rect
         except Exception as e:
-            # Don't leave the window hidden if the overlay crashes
-            if was_visible:
-                self.show()
             QMessageBox.critical(self, "截图失败", f"截图时发生错误：\n{e}")
+            # finally block will re-show the window
             return
 
         if rect is None:
-            if was_visible:
-                self.show()
+            # User cancelled (Esc). finally block will re-show the window.
             return
 
         # IMPORTANT: capture the screen BEFORE re-showing the main window,
@@ -465,12 +463,11 @@ class MainWindow(QMainWindow):
                 from PIL import Image as PILImage
                 img = PILImage.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
         except Exception as e:
-            if was_visible:
-                self.show()
             QMessageBox.critical(self, "截图失败", f"截取屏幕时发生错误：\n{e}")
             return
         finally:
-            # Re-show the main window now that capture is done
+            # Always re-show the main window, regardless of success/failure.
+            # This is the ONLY place we call self.show() to avoid double-show.
             if was_visible:
                 self.show()
 
@@ -518,7 +515,6 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _pil_to_qpixmap(img: Image.Image) -> QPixmap:
-        from PySide6.QtGui import QImage
         if img.mode != "RGBA":
             img = img.convert("RGBA")
         data = img.tobytes("raw", "RGBA")
@@ -562,8 +558,11 @@ class MainWindow(QMainWindow):
         image_url_snapshot = self._image_data_url
 
         worker = RecognizeWorker(image_url_snapshot, self.settings)
-        worker.signals.progress.connect(self._on_progress)
-        # Capture generation in the lambda so the slot can verify it.
+        # Capture generation in the lambdas so the slots can verify they're
+        # handling the current request (not a stale one from a previous image).
+        worker.signals.progress.connect(
+            lambda msg, gen=generation: self._on_progress(msg, gen)
+        )
         worker.signals.success.connect(
             lambda text, ms, att, gen=generation: self._on_success(text, ms, att, gen)
         )
@@ -573,7 +572,10 @@ class MainWindow(QMainWindow):
         self._current_worker = worker
         self.thread_pool.start(worker)
 
-    def _on_progress(self, msg: str) -> None:
+    def _on_progress(self, msg: str, generation: int) -> None:
+        # Discard progress updates from stale (superseded) workers.
+        if generation != self._recognize_generation:
+            return
         self.status_progress.setText(msg)
 
     def _on_success(self, text: str, elapsed_ms: int, attempts: int,
@@ -630,7 +632,6 @@ class MainWindow(QMainWindow):
         clipboard = QGuiApplication.clipboard()
         if fmt == "word":
             # Provide both HTML and plain text so Word can pick the rich version
-            from PySide6.QtCore import QMimeData
             mime = QMimeData()
             mime.setHtml(out)
             mime.setText(text)
@@ -706,7 +707,6 @@ class MainWindow(QMainWindow):
                     return
         elif mime.hasImage():
             qimg = mime.imageData()
-            from PySide6.QtGui import QImage
             rgba = qimg.convertToFormat(QImage.Format.Format_RGBA8888)
             ptr = rgba.constBits()
             ptr.setsize(rgba.sizeInBytes())
@@ -721,4 +721,20 @@ class MainWindow(QMainWindow):
         self.settings.window_geometry = self.saveGeometry().data().hex()
         self.settings.window_state = self.saveState().data().hex()
         save_settings(self.settings)
+
+        # Invalidate any in-flight recognition/preview workers so their
+        # signal handlers don't fire on a deleted MainWindow.
+        self._recognize_generation += 1
+        if hasattr(self.result_edit, "_preview_generation"):
+            self.result_edit._preview_generation += 1
+
+        # Drop queued (not-yet-started) workers and wait briefly for any
+        # running workers to finish, so they don't emit signals into a
+        # deleted C++ object.
+        try:
+            self.thread_pool.clear()
+            self.thread_pool.waitForDone(2000)
+        except Exception:
+            pass
+
         super().closeEvent(event)
