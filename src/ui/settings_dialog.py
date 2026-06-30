@@ -21,7 +21,7 @@ Layout:
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont, QIcon
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -217,8 +217,14 @@ class SettingsDialog(QDialog):
         self.history_max_spin.setValue(s.history_max_items)
         self.hotkey_edit.setText(s.screenshot_hotkey)
 
-        # Trigger doc link update
-        self._on_preset_changed(self.preset_combo.currentIndex())
+        # Update only the doc link, NOT the base_url/model fields —
+        # those should retain the user's saved values.
+        preset_id = self.preset_combo.currentData()
+        preset = PRESET_BY_ID.get(preset_id)
+        if preset and preset.doc_url:
+            self.doc_link.setText(f'<a href="{preset.doc_url}">{preset.doc_url}</a>')
+        else:
+            self.doc_link.setText("")
 
     def get_settings(self) -> Settings:
         """Return a new Settings object populated from the dialog fields."""

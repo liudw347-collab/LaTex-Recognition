@@ -74,12 +74,24 @@ def to_word_html(raw: str) -> str:
     s = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", s)
     s = re.sub(r"\*(.+?)\*", r"<em>\1</em>", s)
 
-    # Unordered lists
-    s = re.sub(r"^[-*] (.+)$", r"<li>\1</li>", s, flags=re.MULTILINE)
-    s = re.sub(r"(<li>.*</li>\n?)+", lambda m: f"<ul>{m.group(0)}</ul>", s)
+    # Lists: convert markdown bullets to <li> with type markers, then wrap.
+    # We use sentinel-prefixed <li> tags so ul and ol items can be
+    # distinguished during the wrapping pass.
+    s = re.sub(r"^[-*] (.+)$", r"<UL_LI>\1</UL_LI>", s, flags=re.MULTILINE)
+    s = re.sub(r"^\d+\. (.+)$", r"<OL_LI>\1</OL_LI>", s, flags=re.MULTILINE)
 
-    # Ordered lists
-    s = re.sub(r"^\d+\. (.+)$", r"<li>\1</li>", s, flags=re.MULTILINE)
+    # Wrap consecutive ul items in <ul>
+    s = re.sub(
+        r"(<UL_LI>.*?</UL_LI>\n?)+",
+        lambda m: "<ul>" + m.group(0).replace("UL_LI", "li") + "</ul>",
+        s,
+    )
+    # Wrap consecutive ol items in <ol>
+    s = re.sub(
+        r"(<OL_LI>.*?</OL_LI>\n?)+",
+        lambda m: "<ol>" + m.group(0).replace("OL_LI", "li") + "</ol>",
+        s,
+    )
 
     # Wrap loose paragraphs in <p>
     out_blocks: list[str] = []

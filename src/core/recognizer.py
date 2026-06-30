@@ -165,10 +165,12 @@ def recognize_image(
     if not settings.model:
         return RecognizeResult(False, error="未配置模型名称")
 
-    image_b64 = extract_base64(image_data_url)
-    # Re-wrap as a proper data URL if the caller passed raw base64.
+    # Ensure the image is a proper data URL; if the caller passed raw
+    # base64, wrap it. We don't use extractBase64's return value here
+    # because the AI API accepts data URLs directly.
     if not image_data_url.startswith("data:image/"):
-        image_data_url = "data:image/png;base64," + image_b64
+        b64 = extract_base64(image_data_url)
+        image_data_url = "data:image/png;base64," + b64
 
     headers = {
         "Content-Type": "application/json",

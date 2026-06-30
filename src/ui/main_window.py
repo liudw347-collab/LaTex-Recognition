@@ -9,23 +9,20 @@ Layout (single window, 3-pane vertically):
 
 from __future__ import annotations
 
-import io
 import time
 from pathlib import Path
 
 from PIL import Image
-from PySide6.QtCore import Qt, QThreadPool, QTimer, QSize
+from PySide6.QtCore import Qt, QThreadPool, QTimer
 from PySide6.QtGui import (
     QAction,
     QGuiApplication,
-    QIcon,
     QKeySequence,
     QPixmap,
     QShortcut,
 )
 from PySide6.QtWidgets import (
     QApplication,
-    QCheckBox,
     QComboBox,
     QFileDialog,
     QFrame,
@@ -33,11 +30,9 @@ from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
     QMessageBox,
-    QPlainTextEdit,
     QPushButton,
     QSplitter,
     QStatusBar,
-    QTextEdit,
     QToolBar,
     QVBoxLayout,
     QWidget,
@@ -111,6 +106,14 @@ class MainWindow(QMainWindow):
         self._image_data_url: str | None = None
         self._recognized_text: str = ""
         self._is_recognizing: bool = False
+        # Monotonic generation token for recognition requests. When a
+        # recognition result arrives, we check that its generation matches
+        # the current one — if not, the user has loaded a different image
+        # (or cleared) and the stale result is discarded.
+        self._recognize_generation: int = 0
+        # Track the screenshot shortcut so we can update (not duplicate)
+        # it when settings change.
+        self._screenshot_shortcut: QShortcut | None = None
 
         self._build_ui()
         self._apply_style()
@@ -141,14 +144,16 @@ class MainWindow(QMainWindow):
         toolbar.addAction(self.action_open)
 
         self.action_paste = QAction("📋 粘贴图片", self)
-        self.action_paste.setShortcut(QKeySequence("Ctrl+V"))
+        # NOTE: Ctrl+V is handled by a dedicated QShortcut in
+        # _install_paste_filter() so we can intelligently decide whether
+        # to paste an image or let the text editor handle text. Don't
+        # set the shortcut on the action to avoid double-firing.
         self.action_paste.triggered.connect(self._on_paste)
         toolbar.addAction(self.action_paste)
 
         self.action_screenshot = QAction("📷 屏幕截图", self)
-        self.action_screenshot.setShortcut(
-            QKeySequence(self.settings.screenshot_hotkey)
-        )
+        # Screenshot hotkey is set up via QShortcut in
+        # _setup_screenshot_hotkey() so it can be updated dynamically.
         self.action_screenshot.triggered.connect(self._on_screenshot)
         toolbar.addAction(self.action_screenshot)
 
@@ -316,25 +321,20 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------- paste handler
 
     def _install_paste_filter(self) -> None:
-        # Use a global shortcut to catch Ctrl+V even when focus is in result_edit
+        """Install a single Ctrl+V shortcut that intelligently decides
+        whether to paste an image (if clipboard has one) or let the text
+        editor handle plain-text paste."""
         paste_shortcut = QShortcut(QKeySequence("Ctrl+V"), self)
-        paste_shortcut.activated.connect(self._on_paste)
-        # Also let the result_edit handle Ctrl+V natively when it has focus:
-        # by connecting only at window level and checking focus, we can avoid
-        # hijacking text editing. We delegate to native paste if a text field
-        # has focus.
-        # Reconnect with custom handler:
-        paste_shortcut.activated.disconnect()
         paste_shortcut.activated.connect(self._on_paste_smart)
 
     def _on_paste_smart(self) -> None:
-        # If a text widget has focus and clipboard has no image, let it paste text.
+        # If the inner text editor has focus and the clipboard has no
+        # image, let it paste text natively.
         focus = QApplication.focusWidget()
         clipboard = QGuiApplication.clipboard()
         mime = clipboard.mimeData()
         inner_edit = getattr(self.result_edit, "text_edit", None)
         if focus is inner_edit and not (mime and mime.hasImage()):
-            # Allow native text paste into the inner QPlainTextEdit
             inner_edit.paste()
             return
         self._on_paste()
@@ -342,11 +342,22 @@ class MainWindow(QMainWindow):
     # ----------------------------------------------------- screenshot hotkey
 
     def _setup_screenshot_hotkey(self) -> None:
-        try:
-            sc = QShortcut(QKeySequence(self.settings.screenshot_hotkey), self)
-            sc.activated.connect(self._on_screenshot)
-        except Exception:
-            pass  # invalid sequence — skip silently
+        """Create or update the screenshot hotkey. Deletes the previous
+        shortcut to avoid duplicates when settings change."""
+        # Remove the old shortcut if it exists
+        if self._screenshot_shortcut is not None:
+            self._screenshot_shortcut.deleteLater()
+            self._screenshot_shortcut = None
+
+        key_seq_str = self.settings.screenshot_hotkey
+        if not key_seq_str:
+            return
+        key_seq = QKeySequence(key_seq_str)
+        if key_seq.isEmpty():
+            return  # invalid hotkey — skip
+        sc = QShortcut(key_seq, self)
+        sc.activated.connect(self._on_screenshot)
+        self._screenshot_shortcut = sc
 
     # ------------------------------------------------------- first-run UX
 
@@ -422,28 +433,46 @@ class MainWindow(QMainWindow):
         QApplication.processEvents()
         time.sleep(0.15)
 
+        rect = None
         try:
             from .screenshot_overlay import ScreenshotOverlay
             overlay = ScreenshotOverlay()
             overlay.exec()
             rect = overlay.selected_rect
-        finally:
+        except Exception as e:
+            # Don't leave the window hidden if the overlay crashes
             if was_visible:
                 self.show()
-
-        if rect is None:
+            QMessageBox.critical(self, "截图失败", f"截图时发生错误：\n{e}")
             return
 
-        with mss.mss() as sct:
-            monitor = {
-                "top": int(rect.y()),
-                "left": int(rect.x()),
-                "width": int(rect.width()),
-                "height": int(rect.height()),
-            }
-            shot = sct.grab(monitor)
-            from PIL import Image as PILImage
-            img = PILImage.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
+        if rect is None:
+            if was_visible:
+                self.show()
+            return
+
+        # IMPORTANT: capture the screen BEFORE re-showing the main window,
+        # otherwise the main window will appear in the screenshot.
+        try:
+            with mss.mss() as sct:
+                monitor = {
+                    "top": int(rect.y()),
+                    "left": int(rect.x()),
+                    "width": int(rect.width()),
+                    "height": int(rect.height()),
+                }
+                shot = sct.grab(monitor)
+                from PIL import Image as PILImage
+                img = PILImage.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
+        except Exception as e:
+            if was_visible:
+                self.show()
+            QMessageBox.critical(self, "截图失败", f"截取屏幕时发生错误：\n{e}")
+            return
+        finally:
+            # Re-show the main window now that capture is done
+            if was_visible:
+                self.show()
 
         self._set_image(img)
 
@@ -476,6 +505,13 @@ class MainWindow(QMainWindow):
 
         self.result_edit.clear()
         self._recognized_text = ""
+
+        # If a previous recognition is in-flight, invalidate it so its
+        # result doesn't overwrite this new image's result.
+        self._recognize_generation += 1
+        self._is_recognizing = False
+        self.re_recognize_btn.setEnabled(True)
+        self.action_recognize.setEnabled(True)
 
         if self.settings.auto_recognize:
             QTimer.singleShot(50, self._on_recognize)
@@ -518,17 +554,33 @@ class MainWindow(QMainWindow):
         # Switch to the edit tab during recognition so user sees progress
         self.result_edit.setCurrentIndex(0)
 
-        worker = RecognizeWorker(self._image_data_url, self.settings)
+        # Stamp this request with a generation token so we can detect
+        # if the user loaded a different image (or cleared) while the
+        # request was in-flight.
+        self._recognize_generation += 1
+        generation = self._recognize_generation
+        image_url_snapshot = self._image_data_url
+
+        worker = RecognizeWorker(image_url_snapshot, self.settings)
         worker.signals.progress.connect(self._on_progress)
-        worker.signals.success.connect(self._on_success)
-        worker.signals.failed.connect(self._on_failed)
+        # Capture generation in the lambda so the slot can verify it.
+        worker.signals.success.connect(
+            lambda text, ms, att, gen=generation: self._on_success(text, ms, att, gen)
+        )
+        worker.signals.failed.connect(
+            lambda err, gen=generation: self._on_failed(err, gen)
+        )
         self._current_worker = worker
         self.thread_pool.start(worker)
 
     def _on_progress(self, msg: str) -> None:
         self.status_progress.setText(msg)
 
-    def _on_success(self, text: str, elapsed_ms: int, attempts: int) -> None:
+    def _on_success(self, text: str, elapsed_ms: int, attempts: int,
+                     generation: int) -> None:
+        # Discard stale results from a previous image.
+        if generation != self._recognize_generation:
+            return
         self._is_recognizing = False
         self._recognized_text = text
         self.result_edit.set_text(text)
@@ -553,7 +605,10 @@ class MainWindow(QMainWindow):
             )
             save_history(self.history, max_items=self.settings.history_max_items)
 
-    def _on_failed(self, error: str) -> None:
+    def _on_failed(self, error: str, generation: int) -> None:
+        # Discard stale errors from a previous image.
+        if generation != self._recognize_generation:
+            return
         self._is_recognizing = False
         self.copy_btn.setEnabled(False)
         self.re_recognize_btn.setEnabled(True)
@@ -590,12 +645,17 @@ class MainWindow(QMainWindow):
         self._pil_image = None
         self._image_data_url = None
         self._recognized_text = ""
+        # Invalidate any in-flight recognition so its result is discarded.
+        self._recognize_generation += 1
+        self._is_recognizing = False
         self.image_label.clear()
         self.result_edit.clear()
         self.splitter.hide()
         self.hero_frame.show()
         self.drop_zone.show()
         self.copy_btn.setEnabled(False)
+        self.re_recognize_btn.setEnabled(True)
+        self.action_recognize.setEnabled(True)
         self.status_progress.setText("就绪")
 
     def _on_open_settings(self) -> None:

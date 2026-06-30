@@ -29,7 +29,7 @@ class PreviewWorker(QRunnable):
         try:
             # Import here so the matplotlib Agg backend init happens in the
             # worker thread (avoids potential GUI-thread contention).
-            from ..core.latex_preview import render_preview
+            from .latex_preview import render_preview
             png = render_preview(self.markdown_text, width=self.width,
                                  font_size=self.font_size)
             self.signals.finished.emit(png or b"")

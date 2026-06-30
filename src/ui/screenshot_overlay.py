@@ -9,7 +9,7 @@ desktop coordinates) in `selected_rect`.
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, QRect, QPoint
-from PySide6.QtGui import QBrush, QColor, QPainter, QPen, QScreen
+from PySide6.QtGui import QBrush, QColor, QGuiApplication, QPainter, QPen
 from PySide6.QtWidgets import QDialog
 
 
@@ -24,6 +24,9 @@ class ScreenshotOverlay(QDialog):
             | Qt.WindowType.WindowStaysOnTopHint
             | Qt.WindowType.Tool
         )
+        # Required for the semi-transparent dimming and the clear-mode
+        # "hole" to actually show the desktop behind the overlay.
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setCursor(Qt.CursorShape.CrossCursor)
 
         # Cover the entire virtual desktop
@@ -36,9 +39,10 @@ class ScreenshotOverlay(QDialog):
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
-        # Dim the whole screen
-        painter.fillRect(self.rect(), QColor(0, 0, 0, 80))
-        # If a selection exists, clear it and draw its border
+        # Dim the whole screen with semi-transparent black
+        painter.fillRect(self.rect(), QColor(0, 0, 0, 100))
+        # If a selection exists, clear that rectangle so the desktop
+        # shows through, then draw a green border around it.
         if not self._start.isNull() and not self._end.isNull():
             r = QRect(self._start, self._end).normalized()
             # Clear the selection rectangle (make it fully transparent)

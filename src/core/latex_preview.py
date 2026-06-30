@@ -27,7 +27,14 @@ from typing import Optional
 # be explicit to avoid ever pulling in a GUI toolkit.
 import matplotlib
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
+# IMPORTANT: we use the OO API (Figure / FigureCanvasAgg) instead of
+# pyplot (plt.figure / plt.close) because pyplot manages global state
+# and is NOT thread-safe. This module is called from background worker
+# threads; using pyplot would cause intermittent crashes and corrupted
+# output when two workers run concurrently.
+from matplotlib.figure import Figure  # noqa: E402
+from matplotlib.backends.backend_agg import FigureCanvasAgg  # noqa: E402
+import matplotlib.font_manager as fm  # noqa: E402
 from matplotlib.font_manager import FontProperties  # noqa: E402
 
 # CJK font discovery: try a list of font files that commonly exist on
@@ -85,14 +92,17 @@ if _cjk_font_path:
     except Exception:
         pass
 
-plt.rcParams["font.sans-serif"] = [_cjk_family_name, "DejaVu Sans"]
-plt.rcParams["font.family"] = "sans-serif"
-plt.rcParams["axes.unicode_minus"] = False
+# Set rcParams via matplotlib's global config (thread-safe for reads,
+# set once at import time). These are read by the Figure/Text objects
+# when they render.
+matplotlib.rcParams["font.sans-serif"] = [_cjk_family_name, "DejaVu Sans"]
+matplotlib.rcParams["font.family"] = "sans-serif"
+matplotlib.rcParams["axes.unicode_minus"] = False
 # Use 'cm' math fontset (Computer Modern) for clean math look. Mathtext
 # uses its own internal fonts for math, so CJK family only affects the
 # non-math (rm) text segments.
-plt.rcParams["mathtext.fontset"] = "cm"
-plt.rcParams["mathtext.default"] = "regular"
+matplotlib.rcParams["mathtext.fontset"] = "cm"
+matplotlib.rcParams["mathtext.default"] = "regular"
 
 
 def _get_text_font() -> "FontProperties | None":
@@ -132,9 +142,11 @@ def render_formula_to_png(
         return None
 
     try:
+        # Use the OO API: create a Figure directly (no pyplot global state).
         # Wide figure so the formula isn't wrapped; bbox_inches='tight'
-        # crops down to the actual rendered bounds.
-        fig = plt.figure(figsize=(10, 0.5), dpi=150)
+        # crops down to the actual rendered bounds on save.
+        fig = Figure(figsize=(10, 0.5), dpi=150)
+        FigureCanvasAgg(fig)  # attach a canvas so savefig works
         # mathtext must be wrapped in $...$ for matplotlib to parse it as math.
         # Note: mathtext does NOT support \displaystyle; for "display mode"
         # we just bump the font size up a bit.
@@ -153,18 +165,11 @@ def render_formula_to_png(
             color=color,
         )
         buf = io.BytesIO()
-        # bbox_inches="tight" + pad_inches gives us a tight crop around
-        # the rendered formula.
         fig.savefig(buf, format="png", bbox_inches="tight", pad_inches=0.08,
                     transparent=False, facecolor="white")
-        plt.close(fig)
+        # No plt.close needed — Figure is GC'd when it goes out of scope.
         return buf.getvalue()
     except Exception:
-        # matplotlib prints a lot on parse errors; close any open figure.
-        try:
-            plt.close("all")
-        except Exception:
-            pass
         return None
 
 
@@ -204,9 +209,9 @@ def _render_text_block_to_png(
         )
 
     try:
-        # Use a wide-enough figure so the text isn't wrapped; bbox_inches='tight'
-        # will crop down to the actual text bounds on save.
-        fig = plt.figure(figsize=(10, 0.5), dpi=150)
+        # OO API: no pyplot global state, safe for background threads.
+        fig = Figure(figsize=(10, 0.5), dpi=150)
+        FigureCanvasAgg(fig)
         fig.text(
             0.5,
             0.5,
@@ -219,13 +224,8 @@ def _render_text_block_to_png(
         buf = io.BytesIO()
         fig.savefig(buf, format="png", bbox_inches="tight", pad_inches=0.1,
                     transparent=False, facecolor="white")
-        plt.close(fig)
         return buf.getvalue()
     except Exception:
-        try:
-            plt.close("all")
-        except Exception:
-            pass
         return None
 
 
@@ -357,11 +357,14 @@ def _render_placeholder(text: str, width: int = 800) -> bytes:
     from PIL import Image, ImageDraw, ImageFont
     img = Image.new("RGB", (width, 80), (245, 247, 250))
     draw = ImageDraw.Draw(img)
-    try:
-        font = ImageFont.truetype(
-            "/usr/share/fonts/truetype/chinese/NotoSansSC-Regular.ttf", 14
-        )
-    except Exception:
+    # Use the CJK font discovered at module load (cross-platform).
+    font = None
+    if _cjk_font_path:
+        try:
+            font = ImageFont.truetype(_cjk_font_path, 14)
+        except Exception:
+            pass
+    if font is None:
         font = ImageFont.load_default()
     draw.text((width // 2, 40), text, fill="#9ca3af", font=font, anchor="mm")
     buf = io.BytesIO()

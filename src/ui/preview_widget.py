@@ -40,6 +40,9 @@ class LatexPreviewWidget(QTabWidget):
 
         self.thread_pool = QThreadPool.globalInstance()
         self._current_worker: PreviewWorker | None = None
+        # Monotonic generation counter: only the most-recently-launched
+        # worker's result is applied. Stale results are discarded.
+        self._preview_generation: int = 0
 
         # --- Edit tab ---
         self.edit_tab = QWidget()
@@ -149,18 +152,28 @@ class LatexPreviewWidget(QTabWidget):
             )
             return
 
-        # Cancel any in-flight worker (we don't care about its result anymore)
-        # QThreadPool doesn't support true cancellation, but we ignore the
-        # signal via _current_worker reference swapping.
+        # Increment the generation counter so any in-flight worker's
+        # result will be discarded as stale when it arrives.
+        self._preview_generation += 1
+        generation = self._preview_generation
+
         # Use the current preview area width as the render width.
         render_width = max(self.scroll_area.width() - 24, 400)
 
         worker = PreviewWorker(text, width=render_width, font_size=13)
-        worker.signals.finished.connect(self._on_preview_ready)
+        # Capture the generation in the lambda so the slot can check
+        # whether it's still the latest.
+        worker.signals.finished.connect(
+            lambda data, gen=generation: self._on_preview_ready(data, gen)
+        )
         self._current_worker = worker
         self.thread_pool.start(worker)
 
-    def _on_preview_ready(self, png_bytes: bytes) -> None:
+    def _on_preview_ready(self, png_bytes: bytes, generation: int) -> None:
+        # Discard stale results from older workers.
+        if generation != self._preview_generation:
+            return
+
         if not png_bytes:
             self.preview_label.setText(
                 '<div style="color: #b91c1c; padding: 40px; font-size: 11pt;">'

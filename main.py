@@ -11,26 +11,24 @@ from __future__ import annotations
 
 import sys
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
 from src.ui.main_window import MainWindow
 
 
 def main() -> int:
-    # High-DPI support (PySide6 enables this by default on Qt 6, but explicit
-    # is better than implicit).
+    # High-DPI: Qt 6 enables scaling by default. Set the rounding policy
+    # to PassThrough for sharpest rendering on fractional-DPI displays.
+    # Must be called BEFORE creating QApplication.
     QApplication.setHighDpiScaleFactorRoundingPolicy(
-        __import__("PySide6.QtCore", fromlist=["Qt"]).Qt.HighDpiScaleFactorRoundingPolicy
-        .PassThrough
+        Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
     )
 
     app = QApplication(sys.argv)
     app.setApplicationName("TextLens")
     app.setApplicationDisplayName("TextLens - 图文识别")
     app.setOrganizationName("TextLens")
-
-    # Dark mode palette adjustments: keep default light theme for clarity
-    # but ensure toolbar text shows up correctly on Windows.
 
     window = MainWindow()
     window.show()

@@ -6,7 +6,7 @@ copy, delete, or clear the history.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QFont, QPixmap
 from PySide6.QtWidgets import (
     QDialog,
@@ -51,9 +51,7 @@ class HistoryDialog(QDialog):
         # --- Left: list ---
         left = QVBoxLayout()
         self.list_widget = QListWidget()
-        self.list_widget.setIconSize(self.list_widget.iconSize().expandedTo(
-            self.list_widget.iconSize()  # default; we'll set per-item pixmaps
-        ))
+        self.list_widget.setIconSize(QSize(64, 64))
         self.list_widget.currentRowChanged.connect(self._on_row_changed)
         left.addWidget(self.list_widget, 1)
 
@@ -107,21 +105,31 @@ class HistoryDialog(QDialog):
             list_item = QListWidgetItem()
             list_item.setText(f"{item.id}  [{item.model}]")
             list_item.setData(Qt.ItemDataRole.UserRole, item.id)
-            # Set thumbnail icon
+            # Set thumbnail icon (safely handle corrupt data)
+            thumb_bytes = self._safe_data_url_to_bytes(item.thumbnail)
             pm = QPixmap()
-            pm.loadFromData(self._data_url_to_bytes(item.thumbnail))
-            list_item.setIcon(pm.scaled(48, 48, Qt.AspectRatioMode.KeepAspectRatio,
-                                         Qt.TransformationMode.SmoothTransformation))
+            if thumb_bytes:
+                pm.loadFromData(thumb_bytes)
+            if not pm.isNull():
+                list_item.setIcon(pm.scaled(
+                    56, 56,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                ))
             self.list_widget.addItem(list_item)
         self._title_label.setText(
             f"共 {len(self._items) - len(self._deleted)} 条历史记录"
         )
 
     @staticmethod
-    def _data_url_to_bytes(data_url: str) -> bytes:
-        from ..core.image_utils import data_url_to_bytes
-        _, raw = data_url_to_bytes(data_url)
-        return raw
+    def _safe_data_url_to_bytes(data_url: str) -> bytes:
+        """Convert a data URL to raw bytes, returning b"" on any error."""
+        try:
+            from ..core.image_utils import data_url_to_bytes
+            _, raw = data_url_to_bytes(data_url)
+            return raw
+        except Exception:
+            return b""
 
     def _on_row_changed(self, row: int) -> None:
         if row < 0 or row >= self.list_widget.count():
@@ -130,20 +138,23 @@ class HistoryDialog(QDialog):
         item_id = item.data(Qt.ItemDataRole.UserRole)
         for h in self._items:
             if h.id == item_id:
-                self.preview.setPlainText(h.text)
+                self.preview.setPlainText(h.text or "")
                 self.meta_label.setText(
-                    f"模型：{h.model}    用时：{h.elapsed_ms} ms    "
+                    f"模型：{h.model or '?'}    用时：{h.elapsed_ms} ms    "
                     f"尝试次数：{h.attempts}"
                 )
+                thumb_bytes = self._safe_data_url_to_bytes(h.thumbnail)
                 pm = QPixmap()
-                pm.loadFromBytes(self._data_url_to_bytes(h.thumbnail))
-                self.thumb_label.setPixmap(
-                    pm.scaled(
-                        self.thumb_label.size(),
-                        Qt.AspectRatioMode.KeepAspectRatio,
-                        Qt.TransformationMode.SmoothTransformation,
+                if thumb_bytes:
+                    pm.loadFromData(thumb_bytes)
+                if not pm.isNull():
+                    self.thumb_label.setPixmap(
+                        pm.scaled(
+                            self.thumb_label.size(),
+                            Qt.AspectRatioMode.KeepAspectRatio,
+                            Qt.TransformationMode.SmoothTransformation,
+                        )
                     )
-                )
                 break
 
     def _selected_item(self) -> HistoryItem | None:

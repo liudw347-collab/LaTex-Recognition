@@ -12,8 +12,9 @@ from __future__ import annotations
 import base64
 import io
 import json
+import os
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +25,7 @@ from .config import history_file_path
 
 @dataclass
 class HistoryItem:
-    id: str                  # ISO timestamp used as unique id
+    id: str                  # unique id (timestamp + counter)
     timestamp: float         # unix epoch seconds
     text: str                # recognized text
     model: str               # model name used
@@ -34,15 +35,35 @@ class HistoryItem:
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "HistoryItem":
-        return cls(**{k: d.get(k) for k in cls.__dataclass_fields__})  # type: ignore[attr-defined]
+        """Build a HistoryItem from a dict, using field defaults for any
+        missing keys (forward-compatible with older history files)."""
+        from dataclasses import MISSING
+        kwargs = {}
+        for f in fields(cls):
+            if f.name in d and d[f.name] is not None:
+                kwargs[f.name] = d[f.name]
+            elif f.default is not MISSING:
+                kwargs[f.name] = f.default
+            else:
+                # No default — use a sensible empty value based on the
+                # type annotation string ('str' → '', 'int' → 0, etc.)
+                t = f.type if isinstance(f.type, type) else str(f.type)
+                if 'str' in str(t):
+                    kwargs[f.name] = ""
+                elif 'int' in str(t) or 'float' in str(t):
+                    kwargs[f.name] = 0
+                else:
+                    kwargs[f.name] = None
+        return cls(**kwargs)
 
 
 def make_thumbnail(img: Image.Image, max_size: int = 200) -> str:
     """Return a small data-URL PNG thumbnail for the history view."""
     thumb = img.copy()
     thumb.thumbnail((max_size, max_size), Image.LANCZOS)
+    # Convert to RGBA to preserve transparency, or RGB for opaque images.
     if thumb.mode not in ("RGB", "RGBA"):
-        thumb = thumb.convert("RGB")
+        thumb = thumb.convert("RGBA")
     buf = io.BytesIO()
     thumb.save(buf, format="PNG", optimize=True)
     b64 = base64.b64encode(buf.getvalue()).decode("ascii")
@@ -69,7 +90,6 @@ def save_history(items: list[HistoryItem], max_items: int = 100) -> None:
         json.dumps([asdict(i) for i in trimmed], indent=2, ensure_ascii=False),
         encoding="utf-8",
     )
-    import os
     os.replace(tmp, path)
 
 
@@ -84,8 +104,14 @@ def add_history_item(
 ) -> list[HistoryItem]:
     """Prepend a new item, return the new list (caller is responsible for saving)."""
     now = time.time()
+    # Include milliseconds in the id to avoid collisions when two
+    # recognitions complete in the same second.
+    id_str = "{}-{:03d}".format(
+        time.strftime("%Y%m%d-%H%M%S", time.localtime(now)),
+        int((now * 1000)) % 1000,
+    )
     item = HistoryItem(
-        id=time.strftime("%Y%m%d-%H%M%S", time.localtime(now)),
+        id=id_str,
         timestamp=now,
         text=text,
         model=model,

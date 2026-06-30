@@ -4,25 +4,23 @@
 
 # -*- mode: python ; coding: utf-8 -*-
 
-block_cipher = None
-
 a = Analysis(
     ['../main.py'],
     pathex=['..'],
     binaries=[],
-    datas=[
-        # Include the src package so imports resolve at runtime
-        ('../src', 'src'),
-    ],
+    datas=[],
     hiddenimports=[
         # Explicitly include modules PyInstaller may miss
         'latex2mathml.converter',
+        # mss screen-capture library + platform-specific backends
         'mss',
         'mss.tools',
-        'PIL._tkinter_finder',
+        'mss.windows',
+        'mss.linux',
+        'mss.darwin',
         # matplotlib backend + mathtext (for LaTeX preview)
         'matplotlib',
-        'matplotlib.pyplot',
+        'matplotlib.figure',
         'matplotlib.backends.backend_agg',
         'matplotlib.mathtext',
         'matplotlib._mathtext',
@@ -30,6 +28,8 @@ a = Analysis(
         'pyparsing',
         # PIL plugins used by matplotlib for image I/O
         'PIL.PngImagePlugin',
+        'PIL.BmpImagePlugin',
+        'PIL.JpegImagePlugin',
     ],
     hookspath=[],
     hooksconfig={},
@@ -54,13 +54,10 @@ a = Analysis(
         'PySide6.QtXml',
         'tkinter',
     ],
-    win_no_prefer_redirects=False,
-    win_private_assemblies=False,
-    cipher=block_cipher,
     noarchive=False,
 )
 
-pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+pyz = PYZ(a.pure, a.zipped_data)
 
 exe = EXE(
     pyz,
