@@ -20,6 +20,16 @@ a = Analysis(
         'mss',
         'mss.tools',
         'PIL._tkinter_finder',
+        # matplotlib backend + mathtext (for LaTeX preview)
+        'matplotlib',
+        'matplotlib.pyplot',
+        'matplotlib.backends.backend_agg',
+        'matplotlib.mathtext',
+        'matplotlib._mathtext',
+        'matplotlib.font_manager',
+        'pyparsing',
+        # PIL plugins used by matplotlib for image I/O
+        'PIL.PngImagePlugin',
     ],
     hookspath=[],
     hooksconfig={},

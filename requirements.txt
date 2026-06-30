@@ -13,5 +13,8 @@ Pillow==10.4.0
 # LaTeX -> MathML conversion (for Word paste format)
 latex2mathml==3.77.0
 
+# LaTeX formula preview rendering (matplotlib mathtext, pure Python — no LaTeX install needed)
+matplotlib==3.9.2
+
 # Screen capture (for the screenshot tool)
 mss==9.0.1

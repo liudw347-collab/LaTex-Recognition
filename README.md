@@ -21,11 +21,12 @@
 - **三种图片输入方式**：文件选择、拖拽上传、Ctrl+V 粘贴截图
 - **屏幕截图工具**：快捷键 `Ctrl+Alt+S` 框选屏幕区域自动识别
 - **AI 识别**：调用任意 OpenAI 兼容接口，自动重试 + 限流退避
+- **LaTeX 实时预览（可编辑）**：识别结果在「编辑 / 预览」双标签页中切换，编辑后预览自动刷新（防抖 400ms），支持行内公式 `$...$` 和独立行公式 `$$...$$`，离线渲染（基于 matplotlib mathtext，无需安装 LaTeX）
 - **三种复制格式**：
   - **Typora**：原始 Markdown + LaTeX（`$...$` / `$$...$$`）
   - **Word**：带 MathML 的 HTML，可直接粘贴到 Word 渲染公式
   - **网页输入框**：`\(...\)` / `\[...\]` 语法（适用于 ChatGPT、Notion 等）
-- **结果可编辑**：识别完成后可在文本框中手动修正再复制
+- **结果可编辑**：识别完成后可在文本框中手动修正再复制，预览同步刷新
 - **本地历史记录**：自动保存最近 N 条识别结果，可查看 / 复制 / 删除
 - **多服务商预设**：智谱 GLM / OpenAI / 通义千问 / DeepSeek / Moonshot / 自定义
 
@@ -103,10 +104,13 @@ LaTex-Recognition/
 │   │   ├── recognizer.py       # AI 识别引擎（含重试 / 限流退避）
 │   │   ├── image_utils.py      # 图片加载 + 压缩
 │   │   ├── formats.py          # Typora / Word / Web 三种格式转换
+│   │   ├── latex_preview.py    # LaTeX 公式离线渲染（matplotlib mathtext）
 │   │   ├── history.py          # 本地历史记录管理
-│   │   └── worker.py           # Qt 线程 worker
+│   │   ├── worker.py           # 识别 Qt 线程 worker
+│   │   └── preview_worker.py   # 预览渲染 Qt 线程 worker
 │   └── ui/                     # PySide6 界面
 │       ├── main_window.py      # 主窗口
+│       ├── preview_widget.py   # 编辑/预览双标签页组件
 │       ├── settings_dialog.py  # 设置对话框
 │       ├── history_dialog.py   # 历史记录对话框
 │       └── screenshot_overlay.py # 截图选区覆盖层

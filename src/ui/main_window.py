@@ -58,6 +58,7 @@ from ..core.image_utils import (
     load_image_file,
 )
 from ..core.worker import RecognizeWorker
+from .preview_widget import LatexPreviewWidget
 from .settings_dialog import SettingsDialog
 from .history_dialog import HistoryDialog
 
@@ -224,16 +225,22 @@ class MainWindow(QMainWindow):
         self.image_label.setMinimumSize(400, 300)
         self.image_label.hide()
 
-        # Result editor
-        self.result_edit = QPlainTextEdit()
-        self.result_edit.setPlaceholderText(
-            "识别结果将显示在此处。你可以在此编辑后再复制。"
-        )
+        # Result editor + LaTeX preview (tabbed: 编辑 / 预览)
+        self.result_edit = LatexPreviewWidget()
         self.result_edit.setStyleSheet(
-            "QPlainTextEdit { background: #ffffff; border: 1px solid #e5e7eb;"
-            " border-radius: 8px; padding: 8px; font-size: 11pt; }"
+            "QTabWidget::pane { background: #ffffff; border: 1px solid #e5e7eb;"
+            " border-radius: 8px; }"
+            "QTabBar::tab { background: #f9fafb; padding: 6px 14px;"
+            " border: 1px solid #e5e7eb; border-bottom: none;"
+            " border-top-left-radius: 6px; border-top-right-radius: 6px;"
+            " margin-right: 2px; font-size: 10pt; }"
+            "QTabBar::tab:selected { background: #ffffff;"
+            " border-color: #10b981 #10b981 #ffffff #10b981;"
+            " color: #059669; font-weight: 600; }"
+            "QTabBar::tab:!selected { color: #6b7280; }"
         )
-        self.result_edit.textChanged.connect(self._on_result_edited)
+        # Wire text changes from the inner text_edit to our handler
+        self.result_edit.text_edit.textChanged.connect(self._on_result_edited)
 
         # Splitter: image | result
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -325,9 +332,10 @@ class MainWindow(QMainWindow):
         focus = QApplication.focusWidget()
         clipboard = QGuiApplication.clipboard()
         mime = clipboard.mimeData()
-        if focus in (self.result_edit,) and not (mime and mime.hasImage()):
-            # Allow native text paste
-            self.result_edit.paste()
+        inner_edit = getattr(self.result_edit, "text_edit", None)
+        if focus is inner_edit and not (mime and mime.hasImage()):
+            # Allow native text paste into the inner QPlainTextEdit
+            inner_edit.paste()
             return
         self._on_paste()
 
@@ -507,6 +515,8 @@ class MainWindow(QMainWindow):
         self.copy_btn.setEnabled(False)
         self.re_recognize_btn.setEnabled(False)
         self.action_recognize.setEnabled(False)
+        # Switch to the edit tab during recognition so user sees progress
+        self.result_edit.setCurrentIndex(0)
 
         worker = RecognizeWorker(self._image_data_url, self.settings)
         worker.signals.progress.connect(self._on_progress)
@@ -521,7 +531,7 @@ class MainWindow(QMainWindow):
     def _on_success(self, text: str, elapsed_ms: int, attempts: int) -> None:
         self._is_recognizing = False
         self._recognized_text = text
-        self.result_edit.setPlainText(text)
+        self.result_edit.set_text(text)
         self.copy_btn.setEnabled(True)
         self.re_recognize_btn.setEnabled(True)
         self.action_recognize.setEnabled(True)
@@ -552,12 +562,12 @@ class MainWindow(QMainWindow):
         QMessageBox.critical(self, "识别失败", error)
 
     def _on_result_edited(self) -> None:
-        self._recognized_text = self.result_edit.toPlainText()
+        self._recognized_text = self.result_edit.get_text()
 
     # ------------------------------------------------------- copy
 
     def _on_copy(self) -> None:
-        text = self.result_edit.toPlainText()
+        text = self.result_edit.get_text()
         if not text:
             return
         fmt = self.format_combo.currentData()
