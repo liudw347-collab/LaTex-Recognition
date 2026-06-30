@@ -229,12 +229,15 @@ def recognize_image(
         last_error = err
         emit(f"第 {attempt} 次失败：{err}")
 
-        # 429 rate limit → exponential backoff
+        # 429 rate limit → exponential backoff (skip sleep on last attempt)
         if resp.status_code == 429:
-            wait_ms = settings.retry_backoff_base_ms * attempt
-            emit(f"触发限流，等待 {wait_ms // 1000}s 后重试...")
-            time.sleep(wait_ms / 1000)
-            continue
+            if attempt < settings.max_retries:
+                wait_ms = settings.retry_backoff_base_ms * attempt
+                emit(f"触发限流，等待 {wait_ms // 1000}s 后重试...")
+                time.sleep(wait_ms / 1000)
+                continue
+            # Last attempt — don't sleep, just fall through to break.
+            break
 
         # 400 bad request → no point retrying the same payload
         if resp.status_code == 400:

@@ -26,10 +26,14 @@ a = Analysis(
         'matplotlib._mathtext',
         'matplotlib.font_manager',
         'pyparsing',
-        # PIL plugins used by matplotlib for image I/O
+        # PIL plugins used by matplotlib for image I/O + by the app for
+        # loading user images (PNG/JPG/BMP/WebP/GIF/TIFF).
         'PIL.PngImagePlugin',
         'PIL.BmpImagePlugin',
         'PIL.JpegImagePlugin',
+        'PIL.WebPImagePlugin',
+        'PIL.GifImagePlugin',
+        'PIL.TiffImagePlugin',
     ],
     hookspath=[],
     hooksconfig={},

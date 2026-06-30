@@ -242,7 +242,11 @@ class SettingsDialog(QDialog):
         s.history_enabled = self.history_check.isChecked()
         s.history_max_items = self.history_max_spin.value()
         s.screenshot_hotkey = self.hotkey_edit.text().strip()
-        # Preserve preserved fields
+        # Preserve preserved fields (not exposed in the dialog UI)
+        s.image_quality = self._settings.image_quality
+        s.minimize_to_tray = self._settings.minimize_to_tray
+        s.temperature = self._settings.temperature
+        s.max_tokens = self._settings.max_tokens
         s.window_geometry = self._settings.window_geometry
         s.window_state = self._settings.window_state
         s.last_open_dir = self._settings.last_open_dir

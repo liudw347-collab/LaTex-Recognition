@@ -108,6 +108,9 @@ class LatexPreviewWidget(QTabWidget):
 
     def set_text(self, text: str) -> None:
         """Replace the editor contents. Triggers a preview re-render."""
+        # Stop any pending debounce from prior user typing so it doesn't
+        # fire after we set the new text and trigger an extra render.
+        self._debounce_timer.stop()
         # Block signals to avoid double-debounce while setting text
         self.text_edit.blockSignals(True)
         self.text_edit.setPlainText(text)
@@ -121,8 +124,10 @@ class LatexPreviewWidget(QTabWidget):
 
     def clear(self) -> None:
         # Invalidate any in-flight preview worker so its result doesn't
-        # appear on the just-cleared label.
-        self._preview_generation += 1
+        # appear on the just-cleared label, and stop the debounce timer
+        # so a pending trigger doesn't fire after the clear.
+        self.invalidate()
+        self._debounce_timer.stop()
         self.text_edit.blockSignals(True)
         self.text_edit.clear()
         self.text_edit.blockSignals(False)
@@ -132,6 +137,12 @@ class LatexPreviewWidget(QTabWidget):
             '预览将显示在此处。'
             '</div>'
         )
+
+    def invalidate(self) -> None:
+        """Discard any in-flight preview render by bumping the generation
+        counter. Called by the parent window's closeEvent to prevent
+        late-arriving signals from hitting a destroyed label."""
+        self._preview_generation += 1
 
     # ---------------------------------------------------------- handlers
 

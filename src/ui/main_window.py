@@ -335,7 +335,9 @@ class MainWindow(QMainWindow):
         clipboard = QGuiApplication.clipboard()
         mime = clipboard.mimeData()
         inner_edit = getattr(self.result_edit, "text_edit", None)
-        if focus is inner_edit and not (mime and mime.hasImage()):
+        if (inner_edit is not None
+                and focus is inner_edit
+                and not (mime and mime.hasImage())):
             inner_edit.paste()
             return
         self._on_paste()
@@ -434,44 +436,48 @@ class MainWindow(QMainWindow):
         QApplication.processEvents()
         time.sleep(0.15)
 
-        rect = None
+        # Wrap the ENTIRE post-hide body in a single outer try/finally so
+        # self.show() is guaranteed to run on every exit path (Esc cancel,
+        # overlay exception, capture exception, success). Without this,
+        # the main window would stay hidden when the user cancels a
+        # screenshot by pressing Esc.
         try:
-            from .screenshot_overlay import ScreenshotOverlay
-            overlay = ScreenshotOverlay()
-            overlay.exec()
-            rect = overlay.selected_rect
-        except Exception as e:
-            QMessageBox.critical(self, "截图失败", f"截图时发生错误：\n{e}")
-            # finally block will re-show the window
-            return
+            rect = None
+            try:
+                from .screenshot_overlay import ScreenshotOverlay
+                overlay = ScreenshotOverlay()
+                overlay.exec()
+                rect = overlay.selected_rect
+            except Exception as e:
+                QMessageBox.critical(self, "截图失败", f"截图时发生错误：\n{e}")
+                return
 
-        if rect is None:
-            # User cancelled (Esc). finally block will re-show the window.
-            return
+            if rect is None:
+                # User cancelled (Esc).
+                return
 
-        # IMPORTANT: capture the screen BEFORE re-showing the main window,
-        # otherwise the main window will appear in the screenshot.
-        try:
-            with mss.mss() as sct:
-                monitor = {
-                    "top": int(rect.y()),
-                    "left": int(rect.x()),
-                    "width": int(rect.width()),
-                    "height": int(rect.height()),
-                }
-                shot = sct.grab(monitor)
-                from PIL import Image as PILImage
-                img = PILImage.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
-        except Exception as e:
-            QMessageBox.critical(self, "截图失败", f"截取屏幕时发生错误：\n{e}")
-            return
+            # IMPORTANT: capture the screen BEFORE re-showing the main
+            # window, otherwise the main window will appear in the shot.
+            try:
+                with mss.mss() as sct:
+                    monitor = {
+                        "top": int(rect.y()),
+                        "left": int(rect.x()),
+                        "width": int(rect.width()),
+                        "height": int(rect.height()),
+                    }
+                    shot = sct.grab(monitor)
+                    from PIL import Image as PILImage
+                    img = PILImage.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
+            except Exception as e:
+                QMessageBox.critical(self, "截图失败", f"截取屏幕时发生错误：\n{e}")
+                return
+
+            self._set_image(img)
         finally:
-            # Always re-show the main window, regardless of success/failure.
-            # This is the ONLY place we call self.show() to avoid double-show.
+            # Always re-show the main window, regardless of how we exited.
             if was_visible:
                 self.show()
-
-        self._set_image(img)
 
     # ----------------------------------------------------- set image / run
 
@@ -680,8 +686,14 @@ class MainWindow(QMainWindow):
         if event.mimeData().hasUrls() or event.mimeData().hasImage():
             event.acceptProposedAction()
             self.drop_zone.setProperty("dragging", True)
-            self.drop_zone.style().unpolish(self.drop_zone)
-            self.drop_zone.style().polish(self.drop_zone)
+        else:
+            # Rejected drag — make sure the highlight style is cleared
+            # (could be left over from a previous accepted drag).
+            self.drop_zone.setProperty("dragging", False)
+            event.ignore()
+        # Either way, refresh the style so the property change takes effect.
+        self.drop_zone.style().unpolish(self.drop_zone)
+        self.drop_zone.style().polish(self.drop_zone)
 
     def dragLeaveEvent(self, event) -> None:
         self.drop_zone.setProperty("dragging", False)
@@ -725,8 +737,9 @@ class MainWindow(QMainWindow):
         # Invalidate any in-flight recognition/preview workers so their
         # signal handlers don't fire on a deleted MainWindow.
         self._recognize_generation += 1
-        if hasattr(self.result_edit, "_preview_generation"):
-            self.result_edit._preview_generation += 1
+        # Use the public API rather than poking at private attributes.
+        if hasattr(self.result_edit, "invalidate"):
+            self.result_edit.invalidate()
 
         # Drop queued (not-yet-started) workers and wait briefly for any
         # running workers to finish, so they don't emit signals into a
